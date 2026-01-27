@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch-symbol-finder"
+version = "0.1.0"
+description = "Resolve dotted torch symbols to importable paths in the current environment."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+torch-symbol-finder = "torch_symbol_finder.cli:main"
