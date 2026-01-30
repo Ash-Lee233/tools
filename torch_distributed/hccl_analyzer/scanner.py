@@ -39,7 +39,6 @@ def iter_python_files(root: str | Path) -> Iterator[Path]:
     """Yield all ``*.py`` files under *root*, skipping uninteresting dirs."""
     root = Path(root)
     for dirpath, dirnames, filenames in os.walk(root):
-        # prune in-place
         dirnames[:] = [
             d for d in dirnames
             if d not in _SKIP_DIRS and not d.endswith(".egg-info")
@@ -50,7 +49,7 @@ def iter_python_files(root: str | Path) -> Iterator[Path]:
 
 
 # ---------------------------------------------------------------------------
-# HCCL reference scanning
+# HCCL reference scanning (file-level and range-level)
 # ---------------------------------------------------------------------------
 
 def scan_hccl_references(filepath: Path) -> list[HCCLReference]:
@@ -70,16 +69,61 @@ def scan_hccl_references(filepath: Path) -> list[HCCLReference]:
                     pattern=pat.pattern,
                     context=line,
                 ))
-                break  # one match per line is enough
+                break
     return refs
+
+
+def scan_hccl_in_range(
+    filepath: Path, start: int, end: int,
+) -> list[HCCLReference]:
+    """Scan HCCL patterns only within lines [start, end]."""
+    refs: list[HCCLReference] = []
+    try:
+        text = filepath.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return refs
+
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if lineno < start:
+            continue
+        if lineno > end:
+            break
+        for pat in HCCL_PATTERNS:
+            if pat.search(line):
+                refs.append(HCCLReference(
+                    file=str(filepath),
+                    line=lineno,
+                    pattern=pat.pattern,
+                    context=line,
+                ))
+                break
+    return refs
+
+
+# ---------------------------------------------------------------------------
+# Function body ranges
+# ---------------------------------------------------------------------------
+
+def get_function_body_ranges(filepath: Path) -> dict[str, tuple[int, int]]:
+    """Return ``{func_name: (start_line, end_line)}`` for all top-level defs."""
+    try:
+        source = filepath.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source, filename=str(filepath))
+    except (OSError, SyntaxError):
+        return {}
+
+    ranges: dict[str, tuple[int, int]] = {}
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = getattr(node, "end_lineno", node.lineno + 100)
+            ranges[node.name] = (node.lineno, end)
+    return ranges
 
 
 # ---------------------------------------------------------------------------
 # Public API surface extraction
 # ---------------------------------------------------------------------------
 
-# Paths (relative to repo root) that may define distributed public APIs.
-# Covers both standard PyTorch layout AND torch_npu plugin layout.
 _DISTRIBUTED_PATH_FRAGMENTS = (
     os.path.join("torch", "distributed"),
     os.path.join("torch_npu", "distributed"),
@@ -92,7 +136,6 @@ def _is_distributed_path(filepath: Path, repo_root: Path) -> bool:
         rel = str(filepath.relative_to(repo_root))
     except ValueError:
         return False
-    # Normalise separators for Windows
     rel = rel.replace("\\", "/")
     return any(
         frag.replace("\\", "/") in rel
@@ -127,14 +170,7 @@ def extract_public_apis(filepath: Path, repo_root: Path) -> list[DistributedAPI]
     apis: list[DistributedAPI] = []
 
     for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
-            apis.append(DistributedAPI(
-                qualified_name=f"{module}.{node.name}",
-                file=str(filepath),
-                line=node.lineno,
-                kind="function",
-            ))
-        elif isinstance(node, ast.AsyncFunctionDef) and not node.name.startswith("_"):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
             apis.append(DistributedAPI(
                 qualified_name=f"{module}.{node.name}",
                 file=str(filepath),
@@ -156,14 +192,17 @@ def extract_public_apis(filepath: Path, repo_root: Path) -> list[DistributedAPI]
 # Monkey-patch detection
 # ---------------------------------------------------------------------------
 
-# Pattern: ``torch.distributed.XXX = ...``
 _MONKEY_PATCH_RE = re.compile(
     r"^\s*(torch\.distributed(?:\.\w+)*\.(\w+))\s*=\s*(.+)",
 )
 
 
 def extract_monkey_patches(filepath: Path) -> list[DistributedAPI]:
-    """Find ``torch.distributed.X = ...`` assignments that patch the public API."""
+    """Find ``torch.distributed.X = ...`` assignments that patch the public API.
+
+    Also captures the RHS as ``impl_target`` so the analyzer can resolve the
+    actual implementation function.
+    """
     apis: list[DistributedAPI] = []
     try:
         text = filepath.read_text(encoding="utf-8", errors="replace")
@@ -174,11 +213,16 @@ def extract_monkey_patches(filepath: Path) -> list[DistributedAPI]:
         m = _MONKEY_PATCH_RE.search(line)
         if m:
             full_target = m.group(1)
+            rhs = m.group(3).strip()
+            # Extract first dotted identifier from RHS
+            impl_match = re.match(r"([\w.]+)", rhs)
+            impl_target = impl_match.group(1) if impl_match else ""
             apis.append(DistributedAPI(
                 qualified_name=full_target,
                 file=str(filepath),
                 line=lineno,
                 kind="monkey-patch",
+                impl_target=impl_target,
             ))
     return apis
 
@@ -188,12 +232,7 @@ def extract_monkey_patches(filepath: Path) -> list[DistributedAPI]:
 # ---------------------------------------------------------------------------
 
 def extract_function_calls(filepath: Path) -> dict[str, set[str]]:
-    """Return a mapping *function_name -> {called_names}* for top-level defs.
-
-    This is a lightweight, best-effort extraction used by the BFS in
-    ``analyzer.py``.  It considers simple ``Name`` and ``Attribute`` call
-    nodes.
-    """
+    """Return a mapping *function_name -> {called_names}* for top-level defs."""
     try:
         source = filepath.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(source, filename=str(filepath))

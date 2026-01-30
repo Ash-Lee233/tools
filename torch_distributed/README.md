@@ -108,6 +108,8 @@ Tier 1 - HIGH confidence (direct HCCL reference)  [31 APIs]
   ...
 ```
 
+**Understanding HCCL References**: The "HCCL references" section shows specific code locations where the API directly uses HCCL components (classes, imports, operators). These references prove the API requires HCCL runtime support—without HCCL, the code would fail to import, instantiate, or execute HCCL-specific functionality.
+
 ### Excel (`--excel`)
 
 Generates an `.xlsx` file with color-coded rows by tier:
@@ -125,6 +127,27 @@ Generates an `.xlsx` file with color-coded rows by tier:
 
 Requires `openpyxl` (`pip install openpyxl`).
 
+#### Understanding References — Why These APIs Need HCCL
+
+The **References** column provides concrete evidence showing why each API depends on HCCL capabilities:
+
+**Tier 1 (HIGH confidence) References:**
+- **Direct HCCL usage**: Shows specific code locations where the API directly imports, instantiates, or calls HCCL-related components (e.g., `ProcessGroupHCCL`, `"hccl"` backend name, `hcom` operators)
+- **Why it matters**: These references prove the API **cannot function without HCCL** because it explicitly uses HCCL classes, checks HCCL availability, or imports NPU-specific distributed modules
+- **Example**: `L247 [ProcessGroupHCCL]: pg = ProcessGroupHCCL(...)` means the API creates an HCCL process group, requiring HCCL runtime support
+
+**Tier 2 (MEDIUM confidence) References:**
+- **ProcessGroup dispatch**: Shows calls to collective operations (`allreduce`, `broadcast`, etc.) through the ProcessGroup abstraction
+- **Why it matters**: On NPU devices, these ProcessGroup calls **automatically route to ProcessGroupHCCL** at runtime. The API relies on HCCL's implementation of collective communication primitives
+- **Example**: `L134: _group.allgather(...)` means the API calls `allgather`, which on NPU devices executes via HCCL's `hcom_allgather` under the hood
+
+**Tier 3 (LOW confidence) References:**
+- **Call chain**: Shows the inferred function call path from the API to HCCL-related code
+- **Why it matters**: The API indirectly depends on HCCL through intermediate functions. While not direct, the dependency chain demonstrates that HCCL capabilities are required somewhere in the execution path
+- **Example**: `func_a -> func_b -> _hccl_allreduce` shows the API eventually reaches HCCL code through a call chain
+
+**Key insight**: References are not just code locations—they are **proof points** that demonstrate the API's dependency on HCCL. Without HCCL runtime support, these APIs would fail or behave incorrectly on NPU devices.
+
 ### JSON (`--json`)
 
 ```json
@@ -140,7 +163,14 @@ Requires `openpyxl` (`pip install openpyxl`).
         "line": 81,
         "kind": "monkey-patch",
         "confidence": "high",
-        "references": [...],
+        "references": [
+          {
+            "file": ".../distributed_c10d.py",
+            "line": 127,
+            "pattern": "HCCL",
+            "context": "warnings.warn(\"HCCL doesn't support gather ...\")"
+          }
+        ],
         "chain": [...]
       }
     ],
@@ -149,6 +179,13 @@ Requires `openpyxl` (`pip install openpyxl`).
   }
 }
 ```
+
+**Understanding the `references` field**: Each entry in `references` contains:
+- `file` & `line`: Exact code location where HCCL dependency is detected
+- `pattern`: The HCCL-related pattern matched (e.g., `"ProcessGroupHCCL"`, `"hccl"`, `"hcom"`)
+- `context`: The actual source code line showing how HCCL is used
+
+These references serve as **evidence** that the API requires HCCL capabilities—they show where and how the code depends on HCCL components.
 
 ## Project Structure
 

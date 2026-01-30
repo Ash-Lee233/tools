@@ -32,7 +32,8 @@ class DistributedAPI:
     qualified_name: str   # e.g. "torch.distributed.all_reduce"
     file: str
     line: int
-    kind: str = "function"  # function | class | method
+    kind: str = "function"  # function | class | method | monkey-patch
+    impl_target: str = ""  # for monkey-patches: dotted path to the RHS impl
 
 
 @dataclass
