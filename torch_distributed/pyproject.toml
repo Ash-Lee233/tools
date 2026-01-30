@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hccl-analyzer"
+version = "0.1.0"
+description = "Static analysis tool to identify torch.distributed APIs that depend on HCCL interfaces."
+requires-python = ">=3.10"
+
+[project.scripts]
+hccl-analyzer = "hccl_analyzer.cli:main"
