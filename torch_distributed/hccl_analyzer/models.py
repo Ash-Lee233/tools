@@ -129,3 +129,68 @@ class AnalysisReport:
                 lines.append("")
 
         return "\n".join(lines)
+
+    def export_excel(self, path: str) -> None:
+        """Write the report to an Excel file."""
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "HCCL Dependencies"
+
+        # Column widths
+        ws.column_dimensions["A"].width = 14
+        ws.column_dimensions["B"].width = 55
+        ws.column_dimensions["C"].width = 70
+        ws.column_dimensions["D"].width = 90
+
+        # Header style
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        wrap_align = Alignment(wrap_text=True, vertical="top")
+
+        # Write headers
+        headers = ["Tier", "API", "File", "References"]
+        for col, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = wrap_align
+
+        # Tier label mapping
+        tier_labels = {
+            Confidence.HIGH: "Tier 1 (HIGH)",
+            Confidence.MEDIUM: "Tier 2 (MEDIUM)",
+            Confidence.LOW: "Tier 3 (LOW)",
+        }
+
+        # Tier row fills for visual grouping
+        tier_fills = {
+            Confidence.HIGH: PatternFill(start_color="DAEEF3", end_color="DAEEF3", fill_type="solid"),
+            Confidence.MEDIUM: PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),
+            Confidence.LOW: PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
+        }
+
+        row = 2
+        for result in self.results:
+            tier_label = tier_labels[result.confidence]
+            api_name = result.api.qualified_name
+            file_loc = f"{result.api.file}:{result.api.line}"
+
+            # Build references text: each reference on its own line
+            ref_lines: list[str] = []
+            for ref in result.references:
+                ref_lines.append(f"{ref.file}:{ref.line}  [{ref.pattern}]")
+                ref_lines.append(f"  {ref.context.strip()}")
+            refs_text = "\n".join(ref_lines)
+
+            fill = tier_fills[result.confidence]
+            for col, value in enumerate([tier_label, api_name, file_loc, refs_text], start=1):
+                cell = ws.cell(row=row, column=col, value=value)
+                cell.alignment = wrap_align
+                cell.fill = fill
+
+            row += 1
+
+        wb.save(path)

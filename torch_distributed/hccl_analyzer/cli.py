@@ -50,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write output to this file instead of stdout.",
     )
+    p.add_argument(
+        "--excel",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Export results to an Excel (.xlsx) file.",
+    )
     return p
 
 
@@ -73,6 +80,11 @@ def main(argv: list[str] | None = None) -> None:
     analyzer = HCCLAnalyzer(repo_path)
     report = analyzer.run()
 
+    # Excel export
+    if args.excel:
+        report.export_excel(args.excel)
+        print(f"Excel report written to {args.excel}", file=sys.stderr)
+
     # Format output
     if args.json_output:
         text = json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
@@ -84,4 +96,5 @@ def main(argv: list[str] | None = None) -> None:
         Path(args.output).write_text(text, encoding="utf-8")
         print(f"Report written to {args.output}", file=sys.stderr)
     else:
-        print(text)
+        if not args.excel:
+            print(text)
