@@ -132,6 +132,7 @@ class AnalysisReport:
 
     def export_excel(self, path: str) -> None:
         """Write the report to an Excel file."""
+        import os
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -140,10 +141,10 @@ class AnalysisReport:
         ws.title = "HCCL Dependencies"
 
         # Column widths
-        ws.column_dimensions["A"].width = 14
+        ws.column_dimensions["A"].width = 16
         ws.column_dimensions["B"].width = 55
-        ws.column_dimensions["C"].width = 70
-        ws.column_dimensions["D"].width = 90
+        ws.column_dimensions["C"].width = 60
+        ws.column_dimensions["D"].width = 80
 
         # Header style
         header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -172,18 +173,19 @@ class AnalysisReport:
             Confidence.LOW: PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
         }
 
+        def _rel(filepath: str) -> str:
+            """Convert absolute path to relative path from repo_path."""
+            try:
+                return os.path.relpath(filepath, self.repo_path)
+            except ValueError:
+                return filepath
+
         row = 2
         for result in self.results:
             tier_label = tier_labels[result.confidence]
             api_name = result.api.qualified_name
-            file_loc = f"{result.api.file}:{result.api.line}"
-
-            # Build references text: each reference on its own line
-            ref_lines: list[str] = []
-            for ref in result.references:
-                ref_lines.append(f"{ref.file}:{ref.line}  [{ref.pattern}]")
-                ref_lines.append(f"  {ref.context.strip()}")
-            refs_text = "\n".join(ref_lines)
+            file_loc = f"{_rel(result.api.file)}:{result.api.line}"
+            refs_text = self._format_refs_for_excel(result, _rel)
 
             fill = tier_fills[result.confidence]
             for col, value in enumerate([tier_label, api_name, file_loc, refs_text], start=1):
@@ -194,3 +196,68 @@ class AnalysisReport:
             row += 1
 
         wb.save(path)
+
+    @staticmethod
+    def _format_refs_for_excel(
+        result: "AnalysisResult",
+        rel_path: "Any",
+    ) -> str:
+        """Build a concise, human-readable references string for Excel."""
+        # Pattern -> human-readable label
+        _PATTERN_LABELS: dict[str, str] = {
+            r"\bProcessGroupHCCL\b": "ProcessGroupHCCL",
+            r"""['"]hccl['"]""": '"hccl"',
+            r"\bHCCL\b": "HCCL",
+            r"\bhcom\b": "hcom",
+            r"\bProcessGroupNPU\b": "ProcessGroupNPU",
+            r"\bhccl_available\b": "hccl_available",
+        }
+
+        lines: list[str] = []
+
+        if result.confidence == Confidence.LOW:
+            # Tier 3: show call chain only
+            if result.chain:
+                chain_str = " -> ".join(e.callee for e in result.chain)
+                lines.append(f"{result.chain[0].caller} -> {chain_str}")
+            return "\n".join(lines)
+
+        if result.confidence == Confidence.MEDIUM:
+            # Tier 2: show PG dispatch calls
+            seen: set[str] = set()
+            for ref in result.references:
+                ctx = ref.context.strip()
+                if ctx not in seen:
+                    seen.add(ctx)
+                    lines.append(f"L{ref.line}: {ctx}")
+            return "\n".join(lines)
+
+        # Tier 1: filter to key references, deduplicate, cap at 5
+        # Priority: "hccl" string / ProcessGroupHCCL / HCCL keyword > generic imports
+        key_refs: list[HCCLReference] = []
+        generic_refs: list[HCCLReference] = []
+        for ref in result.references:
+            if ref.pattern in _PATTERN_LABELS:
+                key_refs.append(ref)
+            else:
+                generic_refs.append(ref)
+
+        # If no key refs, fall back to generic ones
+        chosen = key_refs if key_refs else generic_refs
+
+        seen_ctx: set[str] = set()
+        for ref in chosen:
+            ctx = ref.context.strip()
+            if ctx in seen_ctx:
+                continue
+            seen_ctx.add(ctx)
+            label = _PATTERN_LABELS.get(ref.pattern, ref.pattern)
+            lines.append(f"L{ref.line} [{label}]: {ctx}")
+            if len(lines) >= 5:
+                break
+
+        remaining = len(chosen) - len(lines)
+        if remaining > 0:
+            lines.append(f"... +{remaining} more")
+
+        return "\n".join(lines)

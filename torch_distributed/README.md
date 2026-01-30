@@ -18,6 +18,9 @@ python -m hccl_analyzer --repo-path /path/to/repo --json
 
 # Write to file
 python -m hccl_analyzer --repo-path /path/to/repo --output report.txt
+
+# Export Excel report
+python -m hccl_analyzer --repo-path /path/to/repo --excel report.xlsx
 ```
 
 ## Install (optional)
@@ -72,13 +75,14 @@ The tool discovers APIs from two sources:
 
 ```
 usage: hccl-analyzer [-h] (--repo-path REPO_PATH | --repo-url REPO_URL)
-                     [--json] [--output OUTPUT]
+                     [--json] [--output OUTPUT] [--excel FILE]
 
 options:
   --repo-path REPO_PATH   Path to a local Ascend PyTorch repository
   --repo-url REPO_URL     Git URL to shallow-clone before analysis
   --json                  Emit structured JSON instead of text
   --output, -o OUTPUT     Write output to file instead of stdout
+  --excel FILE            Export results to an Excel (.xlsx) file
 ```
 
 ## Output Format
@@ -103,6 +107,23 @@ Tier 1 - HIGH confidence (direct HCCL reference)  [31 APIs]
         warnings.warn("HCCL doesn't support gather ...")
   ...
 ```
+
+### Excel (`--excel`)
+
+Generates an `.xlsx` file with color-coded rows by tier:
+
+| Tier | API | File | References |
+|------|-----|------|------------|
+| Tier 1 (HIGH) | `torch.distributed.gather` | `torch_npu\__init__.py:198` | `L247 [ProcessGroupHCCL]: ...` |
+| Tier 2 (MEDIUM) | ... | ... | `L134: _group.allgather(...)` |
+| Tier 3 (LOW) | ... | ... | `func_a -> func_b -> func_c` |
+
+- Tier 1 rows: blue background — shows key HCCL patterns (`ProcessGroupHCCL`, `"hccl"`, etc.), filtered and deduplicated, max 5 entries
+- Tier 2 rows: yellow background — shows ProcessGroup dispatch calls
+- Tier 3 rows: orange background — shows the inferred call chain
+- File paths are relative to the repository root
+
+Requires `openpyxl` (`pip install openpyxl`).
 
 ### JSON (`--json`)
 
@@ -148,4 +169,5 @@ torch_distributed/
 ## Requirements
 
 - Python >= 3.10
-- No third-party dependencies (stdlib only)
+- No third-party dependencies for text/JSON output (stdlib only)
+- `openpyxl` for Excel export (`pip install openpyxl`)
