@@ -1,0 +1,3 @@
+pytorch_repo: "/path/to/pytorch/repository"
+torchnpu_repo: "/path/to/torchnpu/repository"
+symbols_txt: "/path/to/symbols.txt"

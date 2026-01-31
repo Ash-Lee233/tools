@@ -26,6 +26,14 @@ python -m torch_symbol_finder.cli --symbols-file symbols.txt
 python -m torch_symbol_finder.cli --json > report.json
 ```
 
+输出 Excel 文件（便于分享和查看）：
+
+```bash
+python -m torch_symbol_finder.cli --excel report.xlsx
+```
+
+> Excel 输出依赖 `openpyxl`，请先安装：`pip install openpyxl`
+
 如果你希望更快一些（不扫描 `torch.*` 子模块的 `__all__` 作为 hint）：
 
 ```bash
@@ -54,7 +62,16 @@ torch.zeroes
 - `[OK]` 表示：在你当前环境中确实能解析到对象
   - 会给出推荐的 import 形态：`from <module> import <name>`（以及后续属性链）
 - `[MISS]` 表示：当前环境中没有该符号（或未导出）
-  - 如果开启 hints，会给出一些“可能导出同名符号”的模块提示（best-effort）
+  - 如果开启 hints，会给出一些"可能导出同名符号"的模块提示（best-effort）
+
+使用 `--excel` 时，输出为格式化的 `.xlsx` 文件，包含四列：
+
+| 列名 | 说明 |
+|------|------|
+| 原始接口 | 原始 dotted symbol |
+| 正确import格式 | 推荐的 `from ... import ...` 写法 |
+| 备注 | 额外属性链或 hint 模块列表 |
+| 状态 | `OK`（绿色）/ `MISS`（红色）/ `HINT`（黄色）|
 
 ## 注意
 
